@@ -77,6 +77,8 @@ set src_dir ${root_dir}/src
 #   bitstream_userid       Bitstream.config userid
 #   bitstream_usr_access   Bitstream.config usr_access
 #   sim                    Build design for simulation
+#   qdma_ip_version        Expected QDMA IP version (e.g. 4.0 or 5.0); empty
+#                          accepts whatever this Vivado release provides
 #
 # Design parameters
 #   build_timestamp  Timestamp to identify the build
@@ -107,6 +109,7 @@ array set build_options {
     -bitstream_userid  "0xDEADC0DE"
     -bitstream_usr_access "0x66669999"
     -sim  0
+    -qdma_ip_version ""
 }
 set build_options(-user_plugin) ${plugin_dir}/p2p
 
@@ -249,6 +252,31 @@ if {![file exists ${ip_build_dir}/manage_ip/]} {
     puts "INFO: \[Manage IP\] Opening existing Manage IP project..."
     open_project -quiet ${ip_build_dir}/manage_ip/manage_ip.xpr
 }
+
+# Resolve the QDMA IP version.  This needs the IP catalog, hence an open
+# project.  The vivado_ip scripts call create_ip without -version, so each
+# Vivado release silently picks its only QDMA version: 4.0 up to Vivado
+# 2022.1, 5.0 from Vivado 2022.2.  QDMA 5.0 needs a driver with QDMA 5.0
+# support, so record the version and optionally enforce it.
+set qdma_ipdefs [lsort -dictionary [get_ipdefs -quiet xilinx.com:ip:qdma:*]]
+if {[llength $qdma_ipdefs] == 0} {
+    puts "ERROR: \[QDMA\] No xilinx.com:ip:qdma IP found in this Vivado installation"
+    exit 1
+}
+set qdma_vlnv [lindex $qdma_ipdefs end]
+set qdma_ip_ver [lindex [split $qdma_vlnv :] end]
+puts "INFO: \[QDMA\] Using $qdma_vlnv (Vivado [version -short])"
+if {[string equal $qdma_ip_version ""]} {
+    if {[package vcompare $qdma_ip_ver 5.0] >= 0} {
+        puts "WARNING: \[QDMA\] QDMA $qdma_ip_ver requires a host driver with QDMA 5.0 support"
+    }
+} elseif {![string equal $qdma_ip_version $qdma_ip_ver]} {
+    puts "ERROR: \[QDMA\] -qdma_ip_version $qdma_ip_version requested, but this Vivado provides $qdma_vlnv"
+    exit 1
+}
+set fp [open "${build_dir}/QDMA_IP_VERSION" w]
+puts $fp "$qdma_vlnv"
+close $fp
 
 # Run synthesis for each IP
 set ip_dict [dict create]

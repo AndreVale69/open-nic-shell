@@ -174,6 +174,14 @@ the design parameters.
     -user_plugin PATH
                  path to the user plugin repository.
 
+    -qdma_ip_version VERSION
+                 expected QDMA IP version, e.g. 4.0 or 5.0.  The build stops if
+                 the Vivado release in use provides a different version.  By
+                 default any version is accepted.  Vivado 2022.1 and earlier
+                 provide QDMA 4.0; Vivado 2022.2 and later provide QDMA 5.0,
+                 which requires a driver with QDMA 5.0 support.  The resolved
+                 IP is written to `build/<build_name>/QDMA_IP_VERSION`.
+
     # Design parameters
 
     -build_timestamp VALUE
