@@ -35,6 +35,92 @@ proc _do_impl {jobs {strategies ""}} {
     }
 }
 
+# Check the QDMA IP instances among the IPs in `ips` (those that exist in the
+# current project).  With a requested version, exit on a different version or
+# on a locked IP (created by another Vivado release).  Returns a list of
+# {ip vlnv locked xci}.
+proc _check_qdma_ips {ips requested context} {
+    set found {}
+    foreach ip $ips {
+        set obj [get_ips -quiet $ip]
+        if {[string equal $obj ""]} {
+            continue
+        }
+        set vlnv [get_property IPDEF $obj]
+        if {![string match "xilinx.com:ip:qdma:*" $vlnv]} {
+            continue
+        }
+        set ver [lindex [split $vlnv :] end]
+        set locked [get_property IS_LOCKED $obj]
+        set xci [get_property IP_FILE $obj]
+        lappend found [list $ip $vlnv $locked $xci]
+        set note [expr {$locked ? " (locked: created by another Vivado release)" : ""}]
+        puts "INFO: \[QDMA\] $context: $ip is ${vlnv}${note}"
+        if {[string equal $requested ""]} {
+            if {$locked} {
+                puts "WARNING: \[QDMA\] $context: $ip is locked, its output products are from another Vivado release; use a new -tag or -overwrite 1"
+            }
+            if {[package vcompare $ver 5.0] >= 0} {
+                puts "WARNING: \[QDMA\] QDMA $ver requires a host driver with QDMA 5.0 support"
+            }
+            continue
+        }
+        if {![string equal $ver $requested]} {
+            puts "ERROR: \[QDMA\] $context: -qdma_ip_version $requested requested, but $ip is $vlnv ($xci); use a new -tag or -overwrite 1"
+            exit 1
+        }
+        if {$locked} {
+            puts "ERROR: \[QDMA\] $context: $ip is locked (created by another Vivado release); use a new -tag or -overwrite 1"
+            exit 1
+        }
+    }
+    if {[llength $found] == 0 && ![string equal $requested ""]} {
+        puts "ERROR: \[QDMA\] $context: no xilinx.com:ip:qdma instance found"
+        exit 1
+    }
+    return $found
+}
+
+# Names of the IPs in the current project
+proc _ip_names {} {
+    set names {}
+    foreach ip [get_ips -quiet] {
+        lappend names [get_property NAME $ip]
+    }
+    return $names
+}
+
+# Write QDMA_IP_VERSION from the check of the project that is (or would be)
+# implemented: first line the QDMA VLNV, then the Vivado version and one line
+# per QDMA instance.  `cache` is the result for the IP build directory.
+proc _record_qdma_ips {path found cache} {
+    if {[llength $found] == 0} {
+        puts "WARNING: \[QDMA\] no QDMA IP in the design project; $path not written"
+        return
+    }
+    set used {}
+    set cached {}
+    foreach q $found {
+        lappend used [lindex $q 1]
+    }
+    foreach q $cache {
+        lappend cached [lindex $q 1]
+    }
+    set used [lsort -unique $used]
+    set cached [lsort -unique $cached]
+    if {![string equal $used $cached]} {
+        puts "WARNING: \[QDMA\] the design project uses $used, the IP build directory has $cached"
+    }
+    set fp [open $path w]
+    puts $fp [lindex [lindex $found 0] 1]
+    puts $fp "vivado [version -short]"
+    foreach q $found {
+        lassign $q q_ip q_vlnv q_locked q_xci
+        puts $fp "ip $q_ip $q_vlnv locked=$q_locked $q_xci"
+    }
+    close $fp
+}
+
 proc _do_post_impl {build_dir top impl_run {zynq_family 0} board} {
     if {$zynq_family} {
         current_run $impl_run
@@ -258,25 +344,26 @@ if {![file exists ${ip_build_dir}/manage_ip/]} {
 # Vivado release silently picks its only QDMA version: 4.0 up to Vivado
 # 2022.1, 5.0 from Vivado 2022.2.  QDMA 5.0 needs a driver with QDMA 5.0
 # support, so record the version and optionally enforce it.
+#
+# The catalog only tells what a new IP would be.  An IP reused from an
+# existing build directory keeps the version it was created with, and an
+# existing design project can reference other IP than that directory holds.
+# So the instances are checked after the IP step and again in the design
+# project, and QDMA_IP_VERSION is written from the design project only.  A
+# stale record is removed first.
+file delete -force ${build_dir}/QDMA_IP_VERSION
 set qdma_ipdefs [lsort -dictionary [get_ipdefs -quiet xilinx.com:ip:qdma:*]]
 if {[llength $qdma_ipdefs] == 0} {
     puts "ERROR: \[QDMA\] No xilinx.com:ip:qdma IP found in this Vivado installation"
     exit 1
 }
 set qdma_vlnv [lindex $qdma_ipdefs end]
-set qdma_ip_ver [lindex [split $qdma_vlnv :] end]
-puts "INFO: \[QDMA\] Using $qdma_vlnv (Vivado [version -short])"
-if {[string equal $qdma_ip_version ""]} {
-    if {[package vcompare $qdma_ip_ver 5.0] >= 0} {
-        puts "WARNING: \[QDMA\] QDMA $qdma_ip_ver requires a host driver with QDMA 5.0 support"
-    }
-} elseif {![string equal $qdma_ip_version $qdma_ip_ver]} {
+puts "INFO: \[QDMA\] Vivado [version -short] IP catalog provides $qdma_vlnv"
+if {![string equal $qdma_ip_version ""] &&
+    [lsearch -exact $qdma_ipdefs xilinx.com:ip:qdma:$qdma_ip_version] < 0} {
     puts "ERROR: \[QDMA\] -qdma_ip_version $qdma_ip_version requested, but this Vivado provides $qdma_vlnv"
     exit 1
 }
-set fp [open "${build_dir}/QDMA_IP_VERSION" w]
-puts $fp "$qdma_vlnv"
-close $fp
 
 # Run synthesis for each IP
 set ip_dict [dict create]
@@ -345,6 +432,9 @@ dict for {module module_dir} $module_dict {
     }
 }
 
+# Check the QDMA IP in the IP build directory (created now or reused)
+set qdma_cache [_check_qdma_ips [dict keys $ip_dict] $qdma_ip_version "IP build"]
+
 # Close the Manage IP project
 close_project
 
@@ -353,6 +443,14 @@ set top_build_dir ${build_dir}/${top}
 
 if {[file exists $top_build_dir] && !$overwrite} {
     puts "INFO: \[$top\] Use existing build (overwrite=0)"
+    # That project decides what an implementation contains; check its IP
+    open_project -read_only ${top_build_dir}/${top}.xpr
+    set qdma_used [_check_qdma_ips [_ip_names] $qdma_ip_version "project $top"]
+    close_project
+    _record_qdma_ips ${build_dir}/QDMA_IP_VERSION $qdma_used $qdma_cache
+    if {$impl || $post_impl || $sim} {
+        puts "WARNING: \[$top\] existing project reused, nothing else is run (-impl, -post_impl and -sim are ignored); use a new -tag or -overwrite 1"
+    }
     return
 }
 if {[file exists $top_build_dir]} {
@@ -378,6 +476,8 @@ set_property verilog_define $verilog_define [current_fileset]
 dict for {ip ip_dir} $ip_dict {
     read_ip -quiet ${ip_dir}/${ip}.xci
 }
+set qdma_used [_check_qdma_ips [_ip_names] $qdma_ip_version "project $top"]
+_record_qdma_ips ${build_dir}/QDMA_IP_VERSION $qdma_used $qdma_cache
 
 # Read user plugin files
 set include_dirs [get_property include_dirs [current_fileset]]

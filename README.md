@@ -176,11 +176,21 @@ the design parameters.
 
     -qdma_ip_version VERSION
                  expected QDMA IP version, e.g. 4.0 or 5.0.  The build stops if
-                 the Vivado release in use provides a different version.  By
-                 default any version is accepted.  Vivado 2022.1 and earlier
+                 the Vivado release in use provides a different version, or if
+                 a QDMA IP instance the design uses has a different version or
+                 is locked.  That happens when a build directory made by
+                 another Vivado release is reused: cached IPs keep the version
+                 they were created with.  Use a new `-tag` (or `-overwrite 1`)
+                 per Vivado release.  By default any version is accepted, with
+                 a warning for a locked QDMA IP.  Vivado 2022.1 and earlier
                  provide QDMA 4.0; Vivado 2022.2 and later provide QDMA 5.0,
-                 which requires a driver with QDMA 5.0 support.  The resolved
-                 IP is written to `build/<build_name>/QDMA_IP_VERSION`.
+                 which requires a driver with QDMA 5.0 support.  The QDMA IP
+                 of the design project, also of an existing one that is
+                 reused, is written to `build/<build_name>/QDMA_IP_VERSION`
+                 after it has been checked: first line the VLNV, then the
+                 Vivado version and one `ip NAME VLNV locked=0|1 XCI` line per
+                 QDMA instance.  An existing design project is reused as is
+                 (no implementation is run) unless `-overwrite 1` is given.
 
     # Design parameters
 
