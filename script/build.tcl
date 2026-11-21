@@ -22,10 +22,12 @@ proc _do_impl {jobs {strategies ""}} {
     } else {
         set impl_runs "impl_1"
         set_property STRATEGY "[lindex $strategies 0]" [get_runs impl_1]
+        # extra runs use the flow of impl_1, which follows the Vivado release
+        set flow [get_property FLOW [get_runs impl_1]]
         for {set i 1} {$i < [llength $strategies]} {incr i 1} {
             set r impl_[expr $i + 1]
             set s [lindex $strategies $i]
-            create_run $r -flow {Vivado Implementation 2020} -parent_run synth_1 -strategy "$s"
+            create_run $r -flow $flow -parent_run synth_1 -strategy "$s"
             lappend impl_runs $r
         }
         launch_runs $impl_runs -to_step write_bitstream -jobs $jobs
@@ -158,6 +160,8 @@ set src_dir ${root_dir}/src
 #   jobs                   Number of jobs for synthesis and implementation
 #   synth_ip               Synthesize IPs before creating design project
 #   impl                   Run implementation after creating design project
+#   impl_strategy          Vivado implementation strategy; a comma separated
+#                          list runs one implementation per strategy
 #   post_impl              Perform post implementation actions
 #   user_plugin            Path to the user plugin repo
 #   bitstream_userid       Bitstream.config userid
@@ -190,6 +194,7 @@ array set build_options {
     -jobs        8
     -synth_ip    1
     -impl        0
+    -impl_strategy "Vivado Implementation Defaults"
     -post_impl   0
     -user_plugin ""
     -bitstream_userid  "0xDEADC0DE"
@@ -573,7 +578,7 @@ if {$sim} {
 # Implement design
 if {$impl} {
     update_compile_order -fileset sources_1
-    _do_impl $jobs {"Vivado Implementation Defaults"}
+    _do_impl $jobs [split $impl_strategy ","]
 }
 
 if {$post_impl} {

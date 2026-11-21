@@ -174,6 +174,14 @@ the design parameters.
     -user_plugin PATH
                  path to the user plugin repository.
 
+    -impl_strategy STRATEGY[,STRATEGY...]
+                 Vivado implementation strategy, by default `Vivado
+                 Implementation Defaults`.  With several, comma separated, one
+                 implementation run per strategy is launched (`impl_1`,
+                 `impl_2`, ...).  For Vivado 2023.2 / QDMA 5.0 on the U250 the
+                 default strategy did not meet timing; try
+                 `Performance_ExplorePostRoutePhysOpt`.
+
     -qdma_ip_version VERSION
                  expected QDMA IP version, e.g. 4.0 or 5.0.  The build stops if
                  the Vivado release in use provides a different version, or if
