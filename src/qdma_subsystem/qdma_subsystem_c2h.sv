@@ -216,7 +216,9 @@ module qdma_subsystem_c2h #(
     .ecc_chkbits_out (c2h_ecc),
 
     .ecc_clk         (axis_aclk),
-    .ecc_clken       (1'b1),
+    // load with the register slice that carries qid and len, so the check
+    // bits stay with their beat while QDMA holds tready low
+    .ecc_clken       (axis_c2h_tvalid && axis_c2h_tready),
     .ecc_reset       (~axil_aresetn)
   );
 
