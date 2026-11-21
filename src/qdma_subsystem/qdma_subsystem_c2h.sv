@@ -92,6 +92,7 @@ module qdma_subsystem_c2h #(
   wire              [42:0] cpl_fifo_dout;
   wire                     cpl_fifo_empty;
   wire                     cpl_fifo_full;
+  wire                     cpl_fifo_wr_rst_busy;
 
   generate for (genvar i = 0; i < NUM_PHYS_FUNC; i += 1) begin
     always @(posedge axis_aclk) begin
@@ -112,7 +113,11 @@ module qdma_subsystem_c2h #(
   end
   endgenerate
 
-  assign arb_ready = axis_c2h_tready && ~cpl_fifo_full;
+  // Accept no packet until the completion FIFO is out of reset: it drops
+  // writes while wr_rst_busy is high, and every later completion would then
+  // be paired with the wrong packet.  prog_full is 0 during reset
+  // (FULL_RESET_VALUE default), so it does not cover this window.
+  assign arb_ready = axis_c2h_tready && ~cpl_fifo_full && ~cpl_fifo_wr_rst_busy;
 
   rr_arbiter #(
     .N (NUM_PHYS_FUNC)
@@ -271,7 +276,7 @@ module qdma_subsystem_c2h #(
     .wr_clk        (axis_aclk),
     .rst           (~axil_aresetn),
     .rd_rst_busy   (),
-    .wr_rst_busy   ()
+    .wr_rst_busy   (cpl_fifo_wr_rst_busy)
   );
 
   assign cpl_fifo_wr_en = m_axis_qdma_c2h_tvalid && m_axis_qdma_c2h_tlast && m_axis_qdma_c2h_tready;
